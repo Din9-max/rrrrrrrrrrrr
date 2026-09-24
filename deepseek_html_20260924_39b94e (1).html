@@ -1,0 +1,1046 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MediaPipe Pong — игра ладонью</title>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #0b2a17;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      color: #f4f4f4;
+    }
+
+    #game-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Видео БЕЗ зеркалирования — как есть с камеры */
+    #webcam {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      filter: brightness(0.65) contrast(1.05) saturate(0.9);
+    }
+
+    #gameCanvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    /* ===== HUD ===== */
+    #hud {
+      position: absolute;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 26px;
+      padding: 10px 26px;
+      background: rgba(15, 40, 25, 0.85);
+      border: 2px solid rgba(245, 245, 245, 0.25);
+      border-radius: 14px;
+      backdrop-filter: blur(8px);
+      z-index: 10;
+      align-items: center;
+    }
+
+    .hud-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-width: 66px;
+    }
+
+    .hud-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #b7c7bd;
+    }
+
+    .hud-value {
+      font-size: 22px;
+      font-weight: 700;
+      color: #fff;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .hud-divider {
+      width: 1px;
+      height: 34px;
+      background: rgba(245, 245, 245, 0.2);
+    }
+
+    /* ===== Переключатель уровня в HUD ===== */
+    .level-switch {
+      display: flex;
+      gap: 6px;
+    }
+
+    .level-btn {
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 8px;
+      border: 2px solid rgba(245, 245, 245, 0.25);
+      background: rgba(15, 40, 25, 0.6);
+      color: #cfd9d2;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+
+    .level-btn:hover {
+      border-color: #ff8c1a;
+      color: #fff;
+    }
+
+    .level-btn.active {
+      background: #c1440e;
+      border-color: #ff8c1a;
+      color: #fff;
+    }
+
+    /* ===== Кнопки управления ===== */
+    #controls {
+      position: absolute;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 12px;
+      z-index: 10;
+    }
+
+    .btn {
+      padding: 12px 26px;
+      font-size: 15px;
+      font-weight: 600;
+      border-radius: 10px;
+      border: 2px solid #c1440e;
+      background: rgba(15, 40, 25, 0.9);
+      color: #f4f4f4;
+      cursor: pointer;
+      transition: transform 0.15s, background 0.2s, color 0.2s;
+    }
+
+    .btn:hover {
+      background: #c1440e;
+      color: #fff;
+      transform: translateY(-2px);
+    }
+
+    .btn:active { transform: translateY(0); }
+
+    .btn.primary {
+      background: #c1440e;
+      color: #fff;
+    }
+
+    .btn.primary:hover { background: #e05415; }
+
+    .btn.big {
+      padding: 16px 42px;
+      font-size: 18px;
+      margin-top: 18px;
+    }
+
+    /* ===== Статус ===== */
+    .status {
+      position: absolute;
+      bottom: 84px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 8px 18px;
+      background: rgba(15, 40, 25, 0.85);
+      border-radius: 10px;
+      font-size: 13px;
+      color: #cfd9d2;
+      z-index: 10;
+      white-space: nowrap;
+    }
+
+    /* ===== Оверлей ===== */
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(6, 22, 14, 0.92);
+      backdrop-filter: blur(6px);
+      z-index: 20;
+      transition: opacity 0.3s;
+    }
+
+    .overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .overlay-card {
+      text-align: center;
+      padding: 40px 52px;
+      border-radius: 20px;
+      background: rgba(15, 45, 28, 0.95);
+      border: 2px solid rgba(245, 245, 245, 0.2);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+      max-width: 520px;
+    }
+
+    .overlay-card h1 {
+      font-size: 32px;
+      margin-bottom: 14px;
+      color: #ff8c1a;
+    }
+
+    .overlay-card p {
+      font-size: 15px;
+      line-height: 1.6;
+      color: #d6e0da;
+      margin-bottom: 6px;
+    }
+
+    .overlay-card .hint {
+      font-size: 13px;
+      color: #93a89c;
+      margin-top: 8px;
+    }
+
+    /* Уровни в оверлее */
+    .difficulty-picker {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin: 22px 0 8px;
+      flex-wrap: wrap;
+    }
+
+    .diff-btn {
+      padding: 12px 22px;
+      font-size: 14px;
+      font-weight: 700;
+      border-radius: 12px;
+      border: 2px solid rgba(245, 245, 245, 0.25);
+      background: rgba(15, 40, 25, 0.6);
+      color: #cfd9d2;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      min-width: 108px;
+    }
+
+    .diff-btn .diff-name {
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .diff-btn .diff-hint {
+      font-size: 11px;
+      color: #93a89c;
+      font-weight: 500;
+    }
+
+    .diff-btn:hover {
+      border-color: #ff8c1a;
+      color: #fff;
+      transform: translateY(-2px);
+    }
+
+    .diff-btn.active {
+      background: #c1440e;
+      border-color: #ff8c1a;
+      color: #fff;
+    }
+
+    .diff-btn.active .diff-hint {
+      color: rgba(255, 255, 255, 0.85);
+    }
+
+    .keys {
+      margin-top: 14px;
+      font-size: 12px;
+      color: #93a89c;
+    }
+
+    .keys kbd {
+      display: inline-block;
+      padding: 2px 7px;
+      margin: 0 2px;
+      border-radius: 5px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      font-family: monospace;
+      color: #f4f4f4;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <video id="webcam" autoplay playsinline muted></video>
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="hud">
+      <div class="hud-item">
+        <span class="hud-label">Очки</span>
+        <span id="score" class="hud-value">0</span>
+      </div>
+      <div class="hud-item">
+        <span class="hud-label">Жизни</span>
+        <span id="lives" class="hud-value">3</span>
+      </div>
+      <div class="hud-item">
+        <span class="hud-label">Рекорд</span>
+        <span id="best" class="hud-value">0</span>
+      </div>
+
+      <div class="hud-divider"></div>
+
+      <div class="hud-item" style="min-width:auto;">
+        <span class="hud-label">Сложность</span>
+        <div class="level-switch">
+          <button class="level-btn" data-level="easy">1 · Легко</button>
+          <button class="level-btn active" data-level="medium">2 · Средне</button>
+          <button class="level-btn" data-level="hard">3 · Сложно</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="controls">
+      <button id="btnPause" class="btn">Старт (Space)</button>
+      <button id="btnReset" class="btn">Сброс</button>
+    </div>
+
+    <div id="status" class="status">Загрузка MediaPipe…</div>
+
+    <div id="overlay" class="overlay">
+      <div class="overlay-card">
+        <h1 id="overlayTitle">🏓 Pong ладонью</h1>
+        <p id="overlayText">
+          Покажите <b>раскрытую ладонь</b> в камеру и отбивайте мяч рукой.
+        </p>
+
+        <div class="difficulty-picker">
+          <button class="diff-btn" data-level="easy">
+            <span class="diff-name">1 · 🟢 Легко</span>
+            <span class="diff-hint">медленный мяч</span>
+          </button>
+          <button class="diff-btn active" data-level="medium">
+            <span class="diff-name">2 · 🟡 Средне</span>
+            <span class="diff-hint">средний темп</span>
+          </button>
+          <button class="diff-btn" data-level="hard">
+            <span class="diff-name">3 · 🔴 Сложно</span>
+            <span class="diff-hint">быстрый мяч</span>
+          </button>
+        </div>
+
+        <p class="hint" id="overlayHint">
+          Если рука не видна — мяч просто пролетит мимо.
+        </p>
+
+        <button id="btnOverlayStart" class="btn primary big">Начать игру</button>
+
+        <div class="keys">
+          <kbd>Space</kbd> — пауза · <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> — уровень · <kbd>R</kbd> — сброс
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import {
+      HandLandmarker,
+      FilesetResolver
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+    /* =========================================================
+     *  DOM
+     * ========================================================= */
+    const video    = document.getElementById("webcam");
+    const canvas   = document.getElementById("gameCanvas");
+    const ctx      = canvas.getContext("2d");
+
+    const scoreEl  = document.getElementById("score");
+    const livesEl  = document.getElementById("lives");
+    const bestEl   = document.getElementById("best");
+    const statusEl = document.getElementById("status");
+    const overlay  = document.getElementById("overlay");
+
+    const overlayTitle = document.getElementById("overlayTitle");
+    const overlayText  = document.getElementById("overlayText");
+    const overlayHint  = document.getElementById("overlayHint");
+
+    const btnPause        = document.getElementById("btnPause");
+    const btnReset        = document.getElementById("btnReset");
+    const btnOverlayStart = document.getElementById("btnOverlayStart");
+
+    const levelBtnsHud    = document.querySelectorAll(".level-btn");
+    const diffBtnsOverlay = document.querySelectorAll(".diff-btn");
+
+    /* =========================================================
+     *  КОНСТАНТЫ
+     * ========================================================= */
+    const GAME_W = 1000;
+    const GAME_H = 600;
+
+    const DIFFICULTIES = {
+      easy: {
+        name: "Легко",
+        baseSpeed: 4.0,
+        speedPerScore: 0.04,
+        maxSpeed: 8,
+        palmRadius: 90,
+        hitCooldown: 160,
+        safeSpawnDist: 260
+      },
+      medium: {
+        name: "Средне",
+        baseSpeed: 4.8,
+        speedPerScore: 0.06,
+        maxSpeed: 10,
+        palmRadius: 70,
+        hitCooldown: 140,
+        safeSpawnDist: 240
+      },
+      hard: {
+        name: "Сложно",
+        baseSpeed: 6.0,
+        speedPerScore: 0.10,
+        maxSpeed: 13,
+        palmRadius: 55,
+        hitCooldown: 110,
+        safeSpawnDist: 220
+      }
+    };
+
+    const ball = {
+      x: GAME_W / 2,
+      y: GAME_H / 2,
+      vx: 0,
+      vy: 0,
+      r: 24
+    };
+
+    const COLORS = {
+      tableDark:  "#0d2b45",
+      tableLight: "#154a73",
+      tableEdge:  "#e8e8e8",
+      ball:       "#ff8c1a",
+      ballRim:    "#b85a00",
+      palmRing:   "#f4f4f4",
+      palmDot:    "#c1440e"
+    };
+
+    /* =========================================================
+     *  СОСТОЯНИЕ
+     * ========================================================= */
+    const state = {
+      running: false,
+      paused: false,
+      difficulty: "medium",
+      score: 0,
+      lives: 3,
+      best: Number(localStorage.getItem("pong_best") || 0),
+      lastHitTime: 0,
+      hand: null,
+      handVisible: false,
+      lastHandSeen: 0
+    };
+
+    function cfg() {
+      return DIFFICULTIES[state.difficulty];
+    }
+
+    /* =========================================================
+     *  MEDIAPIPE
+     * ========================================================= */
+    let handLandmarker = null;
+    let lastVideoTime = -1;
+
+    async function initMediaPipe() {
+      try {
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+        );
+
+        handLandmarker = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+            delegate: "GPU"
+          },
+          runningMode: "VIDEO",
+          numHands: 1,
+          minHandDetectionConfidence: 0.6,
+          minHandPresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5
+        });
+
+        statusEl.textContent = "MediaPipe загружен. Запускаем камеру…";
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 1280, height: 720, facingMode: "user" }
+        });
+        video.srcObject = stream;
+
+        video.addEventListener("loadeddata", () => {
+          statusEl.textContent = "Покажите раскрытую ладонь в кадр";
+          predictLoop();
+        });
+      } catch (err) {
+        console.error(err);
+        let msg = "❌ Ошибка камеры: ";
+        if (err.name === "NotAllowedError") {
+          msg += "доступ запрещён. Нажмите на замок в адресной строке и разрешите камеру.";
+        } else if (err.name === "NotFoundError") {
+          msg += "камера не найдена.";
+        } else if (err.name === "NotReadableError") {
+          msg += "камера занята другим приложением.";
+        } else if (location.protocol === "file:") {
+          msg += "откройте страницу через http://localhost, а не через file://.";
+        } else {
+          msg += err.message;
+        }
+        statusEl.textContent = msg;
+      }
+    }
+
+    /* =========================================================
+     *  ПРЕДСКАЗАНИЕ
+     * ========================================================= */
+    function predictLoop() {
+      if (!handLandmarker) {
+        requestAnimationFrame(predictLoop);
+        return;
+      }
+
+      const now = performance.now();
+      if (video.currentTime !== lastVideoTime) {
+        lastVideoTime = video.currentTime;
+        const results = handLandmarker.detectForVideo(video, now);
+        processHand(results);
+      }
+
+      requestAnimationFrame(predictLoop);
+    }
+
+    /**
+     * Видео НЕ зеркалится, координаты MediaPipe используются
+     * как есть — без инверсии X.
+     */
+    function processHand(results) {
+      if (results.landmarks && results.landmarks.length > 0) {
+        const lm = results.landmarks[0];
+        const wrist = lm[0];
+        const middleMcp = lm[9];
+
+        const rawX = (wrist.x + middleMcp.x) / 2;
+        const rawY = (wrist.y + middleMcp.y) / 2;
+
+        const cx = rawX * GAME_W;
+        const cy = rawY * GAME_H;
+
+        state.hand = { x: cx, y: cy };
+        state.handVisible = true;
+        state.lastHandSeen = performance.now();
+      } else {
+        if (performance.now() - state.lastHandSeen > 250) {
+          state.handVisible = false;
+          state.hand = null;
+        }
+      }
+    }
+
+    /* =========================================================
+     *  ИГРОВАЯ ЛОГИКА
+     * ========================================================= */
+    function resetBall() {
+      const c = cfg();
+      const centerX = GAME_W / 2;
+      const centerY = GAME_H / 2;
+
+      let sx = centerX;
+      let sy = centerY;
+
+      if (state.handVisible && state.hand) {
+        const dx = centerX - state.hand.x;
+        const dy = centerY - state.hand.y;
+        const dist = Math.hypot(dx, dy);
+
+        if (dist < c.safeSpawnDist) {
+          const nx = dist > 0 ? dx / dist : 1;
+          const ny = dist > 0 ? dy / dist : 0;
+
+          sx = state.hand.x + nx * c.safeSpawnDist;
+          sy = state.hand.y + ny * c.safeSpawnDist;
+
+          sx = Math.max(ball.r + 20, Math.min(GAME_W - ball.r - 20, sx));
+          sy = Math.max(ball.r + 20, Math.min(GAME_H - ball.r - 20, sy));
+        }
+      }
+
+      ball.x = sx;
+      ball.y = sy;
+
+      const angle = (Math.random() * 0.5 - 0.25) * Math.PI;
+      const dir = Math.random() > 0.5 ? 1 : -1;
+
+      ball.vx = Math.cos(angle) * c.baseSpeed * dir;
+      ball.vy = Math.sin(angle) * c.baseSpeed;
+    }
+
+    function resetGame() {
+      state.score = 0;
+      state.lives = 3;
+      state.running = false;
+      state.paused = false;
+      state.lastHitTime = 0;
+      updateHUD();
+      updatePauseButton();
+      resetBall();
+
+      showOverlay({
+        title: "🏓 Pong ладонью",
+        text: "Покажите <b>раскрытую ладонь</b> в камеру и отбивайте мяч рукой.",
+        hint: "Если рука не видна — мяч просто пролетит мимо.",
+        buttonText: "Начать игру"
+      });
+    }
+
+    function startGame() {
+      if (!handLandmarker) {
+        statusEl.textContent = "MediaPipe ещё загружается…";
+        return;
+      }
+      state.score = 0;
+      state.lives = 3;
+      state.running = true;
+      state.paused = false;
+      state.lastHitTime = 0;
+      resetBall();
+      updateHUD();
+      updatePauseButton();
+      hideOverlay();
+      statusEl.textContent = "Игра идёт! Отбивайте мяч ладонью.";
+    }
+
+    function pauseGame() {
+      if (!state.running) return;
+      state.paused = true;
+      updatePauseButton();
+      showOverlay({
+        title: "⏸ Пауза",
+        text: "Игра приостановлена.",
+        hint: "Сменить уровень можно кнопками сверху или клавишами 1/2/3.",
+        buttonText: "Продолжить"
+      });
+      statusEl.textContent = "Игра на паузе (Space — продолжить).";
+    }
+
+    function resumeGame() {
+      if (!state.running) return;
+      state.paused = false;
+      updatePauseButton();
+      hideOverlay();
+      statusEl.textContent = "Игра идёт! Отбивайте мяч ладонью.";
+    }
+
+    function togglePause() {
+      if (!state.running) {
+        startGame();
+        return;
+      }
+      if (state.paused) resumeGame();
+      else pauseGame();
+    }
+
+    function gameOver() {
+      state.running = false;
+      state.paused = false;
+      if (state.score > state.best) {
+        state.best = state.score;
+        localStorage.setItem("pong_best", String(state.best));
+      }
+      updateHUD();
+      updatePauseButton();
+
+      showOverlay({
+        title: "Игра окончена",
+        text: `Ваш счёт: <b>${state.score}</b><br>Рекорд: <b>${state.best}</b><br>Сложность: <b>${cfg().name}</b>`,
+        hint: "Можно сменить уровень перед новой игрой.",
+        buttonText: "Играть снова"
+      });
+      statusEl.textContent = "Игра окончена.";
+    }
+
+    function setDifficulty(level) {
+      if (!DIFFICULTIES[level]) return;
+      state.difficulty = level;
+
+      levelBtnsHud.forEach(b => {
+        b.classList.toggle("active", b.dataset.level === level);
+      });
+      diffBtnsOverlay.forEach(b => {
+        b.classList.toggle("active", b.dataset.level === level);
+      });
+
+      if (state.running) {
+        const c = cfg();
+        const curSpeed = Math.hypot(ball.vx, ball.vy) || c.baseSpeed;
+        const newSpeed = Math.min(curSpeed, c.maxSpeed);
+        const ang = Math.atan2(ball.vy, ball.vx) || 0;
+        ball.vx = Math.cos(ang) * newSpeed;
+        ball.vy = Math.sin(ang) * newSpeed;
+        statusEl.textContent = `Сложность: ${c.name}`;
+      } else {
+        resetBall();
+        statusEl.textContent = `Сложность: ${c.name}`;
+      }
+    }
+
+    function updateHUD() {
+      scoreEl.textContent = state.score;
+      livesEl.textContent = state.lives;
+      bestEl.textContent  = state.best;
+    }
+
+    function updatePauseButton() {
+      if (state.paused) btnPause.textContent = "Продолжить (Space)";
+      else if (state.running) btnPause.textContent = "Пауза (Space)";
+      else btnPause.textContent = "Старт (Space)";
+    }
+
+    function showOverlay({ title, text, hint, buttonText }) {
+      overlayTitle.textContent = title;
+      overlayText.innerHTML = text;
+      overlayHint.textContent = hint || "";
+      btnOverlayStart.textContent = buttonText;
+      overlay.classList.remove("hidden");
+    }
+
+    function hideOverlay() {
+      overlay.classList.add("hidden");
+    }
+
+    function updateGame(dt) {
+      if (!state.running || state.paused) return;
+
+      const c = cfg();
+
+      ball.x += ball.vx;
+      ball.y += ball.vy;
+
+      if (ball.y - ball.r < 0) {
+        ball.y = ball.r;
+        ball.vy = Math.abs(ball.vy);
+      }
+      if (ball.y + ball.r > GAME_H) {
+        ball.y = GAME_H - ball.r;
+        ball.vy = -Math.abs(ball.vy);
+      }
+
+      if (state.handVisible && state.hand) {
+        const dx = ball.x - state.hand.x;
+        const dy = ball.y - state.hand.y;
+        const dist = Math.hypot(dx, dy);
+        const now = performance.now();
+
+        if (dist < c.palmRadius + ball.r && now - state.lastHitTime > c.hitCooldown) {
+          state.lastHitTime = now;
+
+          let nx = dx / (dist || 1);
+          let ny = dy / (dist || 1);
+          if (Math.abs(ny) < 0.15) ny = ny >= 0 ? 0.15 : -0.15;
+
+          const speed = Math.min(c.baseSpeed + state.score * c.speedPerScore, c.maxSpeed);
+
+          ball.vx = nx * speed;
+          ball.vy = ny * speed;
+
+          ball.x = state.hand.x + nx * (c.palmRadius + ball.r + 4);
+          ball.y = state.hand.y + ny * (c.palmRadius + ball.r + 4);
+
+          state.score++;
+          updateHUD();
+        }
+      }
+
+      if (ball.x + ball.r < 0) {
+        state.lives--;
+        updateHUD();
+        if (state.lives <= 0) gameOver();
+        else resetBall();
+      }
+
+      if (ball.x - ball.r > GAME_W) {
+        resetBall();
+      }
+    }
+
+    /* =========================================================
+     *  ОТРИСОВКА
+     * ========================================================= */
+    function drawGame() {
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = "rgba(8, 20, 14, 0.5)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const scaleX = canvas.width / GAME_W;
+      const scaleY = canvas.height / GAME_H;
+
+      ctx.save();
+      ctx.scale(scaleX, scaleY);
+
+      // === СТОЛ ===
+      const margin = 30;
+      const tableX = margin;
+      const tableY = margin;
+      const tableW = GAME_W - margin * 2;
+      const tableH = GAME_H - margin * 2;
+
+      ctx.fillStyle = COLORS.tableDark;
+      ctx.fillRect(tableX, tableY, tableW, tableH);
+
+      const grad = ctx.createLinearGradient(tableX, tableY, tableX, tableY + tableH);
+      grad.addColorStop(0, "rgba(21, 74, 115, 0.5)");
+      grad.addColorStop(1, "rgba(13, 43, 69, 0.0)");
+      ctx.fillStyle = grad;
+      ctx.fillRect(tableX, tableY, tableW, tableH);
+
+      ctx.strokeStyle = COLORS.tableEdge;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(tableX, tableY, tableW, tableH);
+
+      // Сетка
+      ctx.beginPath();
+      ctx.setLineDash([14, 14]);
+      ctx.moveTo(GAME_W / 2, tableY);
+      ctx.lineTo(GAME_W / 2, tableY + tableH);
+      ctx.strokeStyle = COLORS.tableEdge;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // === МЯЧ ===
+      ctx.beginPath();
+      ctx.arc(ball.x + 4, ball.y + 6, ball.r, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+      ctx.fillStyle = COLORS.ball;
+      ctx.fill();
+
+      const ballGrad = ctx.createRadialGradient(
+        ball.x - ball.r * 0.35,
+        ball.y - ball.r * 0.35,
+        ball.r * 0.1,
+        ball.x,
+        ball.y,
+        ball.r
+      );
+      ballGrad.addColorStop(0, "rgba(255, 220, 160, 0.85)");
+      ballGrad.addColorStop(0.6, "rgba(255, 140, 26, 0.0)");
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+      ctx.fillStyle = ballGrad;
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+      ctx.strokeStyle = COLORS.ballRim;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // === ЛАДОНЬ ===
+      const c = cfg();
+      if (state.handVisible && state.hand) {
+        const pulse = 1 + Math.sin(performance.now() / 220) * 0.04;
+
+        ctx.beginPath();
+        ctx.arc(state.hand.x, state.hand.y, c.palmRadius * pulse, 0, Math.PI * 2);
+        ctx.strokeStyle = COLORS.palmRing;
+        ctx.lineWidth = 4;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(state.hand.x, state.hand.y, 12, 0, Math.PI * 2);
+        ctx.fillStyle = COLORS.palmDot;
+        ctx.fill();
+
+        ctx.fillStyle = COLORS.palmRing;
+        ctx.font = "bold 16px system-ui";
+        ctx.textAlign = "center";
+        ctx.fillText("ЛАДОНЬ", state.hand.x, state.hand.y + c.palmRadius + 28);
+      } else {
+        ctx.fillStyle = "rgba(244, 244, 244, 0.85)";
+        ctx.font = "22px system-ui";
+        ctx.textAlign = "center";
+        ctx.fillText(
+          "✋ Покажите раскрытую ладонь в кадр",
+          GAME_W / 2,
+          GAME_H - 60
+        );
+      }
+
+      // === Индикатор паузы ===
+      if (state.paused && state.running) {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+        ctx.fillRect(tableX, tableY, tableW, tableH);
+
+        ctx.fillStyle = "#f4f4f4";
+        ctx.font = "bold 64px system-ui";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("⏸", GAME_W / 2, GAME_H / 2 - 10);
+
+        ctx.font = "bold 24px system-ui";
+        ctx.fillText("ПАУЗА", GAME_W / 2, GAME_H / 2 + 50);
+
+        ctx.font = "16px system-ui";
+        ctx.fillStyle = "rgba(244, 244, 244, 0.75)";
+        ctx.fillText("Нажмите Space для продолжения", GAME_W / 2, GAME_H / 2 + 90);
+        ctx.textBaseline = "alphabetic";
+      }
+
+      ctx.restore();
+    }
+
+    /* =========================================================
+     *  ГЛАВНЫЙ ЦИКЛ
+     * ========================================================= */
+    let lastFrameTime = performance.now();
+
+    function loop() {
+      const now = performance.now();
+      const dt = now - lastFrameTime;
+      lastFrameTime = now;
+
+      updateGame(dt);
+      drawGame();
+
+      requestAnimationFrame(loop);
+    }
+
+    /* =========================================================
+     *  СОБЫТИЯ — МЫШЬ
+     * ========================================================= */
+    btnPause.addEventListener("click", (e) => {
+      e.preventDefault();
+      togglePause();
+    });
+
+    btnOverlayStart.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (!handLandmarker) {
+        statusEl.textContent = "MediaPipe ещё загружается…";
+        return;
+      }
+      if (state.running && state.paused) {
+        resumeGame();
+      } else {
+        startGame();
+      }
+    });
+
+    btnReset.addEventListener("click", (e) => {
+      e.preventDefault();
+      resetGame();
+    });
+
+    levelBtnsHud.forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        setDifficulty(btn.dataset.level);
+      });
+    });
+
+    diffBtnsOverlay.forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        setDifficulty(btn.dataset.level);
+      });
+    });
+
+    /* =========================================================
+     *  СОБЫТИЯ — КЛАВИАТУРА
+     * ========================================================= */
+    window.addEventListener("keydown", (e) => {
+      if (e.repeat) return;
+
+      const code = e.code;
+      const key = e.key;
+
+      if (code === "Space" || key === " " || key === "Spacebar") {
+        e.preventDefault();
+        togglePause();
+        return;
+      }
+
+      if (key === "1" || code === "Digit1" || code === "Numpad1") {
+        setDifficulty("easy");
+        return;
+      }
+      if (key === "2" || code === "Digit2" || code === "Numpad2") {
+        setDifficulty("medium");
+        return;
+      }
+      if (key === "3" || code === "Digit3" || code === "Numpad3") {
+        setDifficulty("hard");
+        return;
+      }
+
+      if (key === "r" || key === "R" || key === "к" || key === "К") {
+        resetGame();
+        return;
+      }
+    });
+
+    window.addEventListener("resize", () => {
+      canvas.width  = canvas.clientWidth;
+      canvas.height = canvas.clientHeight;
+    });
+
+    /* =========================================================
+     *  СТАРТ
+     * ========================================================= */
+    (async function bootstrap() {
+      updateHUD();
+      updatePauseButton();
+      setDifficulty(state.difficulty);
+      resetBall();
+      await initMediaPipe();
+      loop();
+    })();
+  </script>
+</body>
+</html>
